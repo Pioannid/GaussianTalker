@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 import os
+
+from matplotlib import pyplot as plt
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import (
     look_at_view_transform,
@@ -27,6 +29,8 @@ from pytorch3d.renderer.blending import (
     sigmoid_alpha_blend,
     softmax_rgb_blend,
 )
+
+from data_utils.process import choose_device
 
 
 class SoftSimpleShader(nn.Module):
@@ -142,7 +146,9 @@ class Render_3DMM(nn.Module):
         renderer = MeshRenderer(
             rasterizer=MeshRasterizer(raster_settings=raster_settings, cameras=cameras),
             shader=SoftSimpleShader(
-                lights=lights, blend_params=blend_params, cameras=cameras
+                device=self.device.type, lights=lights,
+                blend_params=blend_params,
+                cameras=cameras
             ),
         )
         return renderer.to(self.device)
@@ -191,6 +197,7 @@ class Render_3DMM(nn.Module):
         face_normal = self.compute_normal(rott_geometry)
         face_color = self.Illumination_layer(texture, face_normal, diffuse_sh)
         face_color = TexturesVertex(face_color)
+        print("starting meshes")
         mesh = Meshes(
             rott_geometry,
             self.tris.float().repeat(rott_geometry.shape[0], 1, 1),
@@ -198,5 +205,13 @@ class Render_3DMM(nn.Module):
         )
         rendered_img = self.renderer(mesh)
         rendered_img = torch.clamp(rendered_img, 0, 255)
-
+        self.visualize(rendered_img)
         return rendered_img
+
+    def visualize(self, rendered_img):
+        plt.ion()
+        img = rendered_img[0, ..., :3].cpu().numpy().astype(np.uint8)
+        plt.imshow(img)
+        plt.show()
+        plt.draw()
+        plt.pause(1)

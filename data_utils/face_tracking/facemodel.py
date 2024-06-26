@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 import os
+
+from data_utils.process import choose_device
 from util import *
 
 
@@ -11,6 +13,7 @@ class Face_3DMM(nn.Module):
         # id_dim = 100
         # exp_dim = 79
         # tex_dim = 100
+        device = choose_device()
         self.point_num = point_num
         DMM_info = np.load(
             os.path.join(modelpath, "3DMM_info.npy"), allow_pickle=True
@@ -24,27 +27,27 @@ class Face_3DMM(nn.Module):
         for i in range(3):
             mu[:, i] -= np.mean(mu[:, i])
         mu = mu.reshape(-1)
-        self.base_id = torch.as_tensor(base_id).cuda() / 100000.0
-        self.base_exp = torch.as_tensor(base_exp).cuda() / 100000.0
-        self.mu = torch.as_tensor(mu).cuda() / 100000.0
+        self.base_id = torch.as_tensor(base_id).to(device) / 100000.0
+        self.base_exp = torch.as_tensor(base_exp).to(device) / 100000.0
+        self.mu = torch.as_tensor(mu).to(device) / 100000.0
         base_tex = DMM_info["b_tex"][:tex_dim, :]
         mu_tex = DMM_info["mu_tex"]
-        self.base_tex = torch.as_tensor(base_tex).cuda()
-        self.mu_tex = torch.as_tensor(mu_tex).cuda()
+        self.base_tex = torch.as_tensor(base_tex).to(device)
+        self.mu_tex = torch.as_tensor(mu_tex).to(device)
         sig_id = DMM_info["sig_shape"][:id_dim]
         sig_tex = DMM_info["sig_tex"][:tex_dim]
         sig_exp = DMM_info["sig_exp"][:exp_dim]
-        self.sig_id = torch.as_tensor(sig_id).cuda()
-        self.sig_tex = torch.as_tensor(sig_tex).cuda()
-        self.sig_exp = torch.as_tensor(sig_exp).cuda()
+        self.sig_id = torch.as_tensor(sig_id).to(device)
+        self.sig_tex = torch.as_tensor(sig_tex).to(device)
+        self.sig_exp = torch.as_tensor(sig_exp).to(device)
 
         keys_info = np.load(
             os.path.join(modelpath, "keys_info.npy"), allow_pickle=True
         ).item()
-        self.keyinds = torch.as_tensor(keys_info["keyinds"]).cuda()
-        self.left_contours = torch.as_tensor(keys_info["left_contour"]).cuda()
-        self.right_contours = torch.as_tensor(keys_info["right_contour"]).cuda()
-        self.rigid_ids = torch.as_tensor(keys_info["rigid_ids"]).cuda()
+        self.keyinds = torch.as_tensor(keys_info["keyinds"]).to(device)
+        self.left_contours = torch.as_tensor(keys_info["left_contour"]).to(device)
+        self.right_contours = torch.as_tensor(keys_info["right_contour"]).to(device)
+        self.rigid_ids = torch.as_tensor(keys_info["rigid_ids"]).to(device)
 
     def get_3dlandmarks(self, id_para, exp_para, euler_angle, trans, focal_length, cxy):
         id_para = id_para * self.sig_id

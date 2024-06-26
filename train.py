@@ -13,6 +13,8 @@ import random
 import os, sys
 import torch
 from random import randint
+
+from data_utils.process import choose_device
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import network_gui, render_from_batch
 import sys
@@ -55,9 +57,15 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
     if stage == "fine" and first_iter == 0:
         gaussians.mlp2cpu()
-        
-    iter_start = torch.cuda.Event(enable_timing = True)
-    iter_end = torch.cuda.Event(enable_timing = True)
+
+    device = choose_device()
+
+    if device.type == 'cuda':
+        iter_start = torch.cuda.Event(enable_timing=True)
+        iter_end = torch.cuda.Event(enable_timing=True)
+    else:
+        iter_start = None
+        iter_end = None
 
     viewpoint_stack = None
     ema_loss_for_log = 0.0

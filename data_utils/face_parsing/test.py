@@ -58,8 +58,18 @@ def evaluate(respth='./res/test_res', dspth='./data', cp='model_final_diss.pth')
     print(f'[INFO] loading model...')
     n_classes = 19
     net = BiSeNet(n_classes=n_classes)
-    net.cuda()
-    net.load_state_dict(torch.load(cp))
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        print("Using CUDA backend.")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+        print("Using MPS backend.")
+    else:
+        device = torch.device("cpu")
+        print("Using CPU backend.")
+
+    net.to(device)
+    net.load_state_dict(torch.load(cp, map_location=device))
     net.eval()
 
     to_tensor = transforms.Compose([
@@ -80,7 +90,8 @@ def evaluate(respth='./res/test_res', dspth='./data', cp='model_final_diss.pth')
 
                 # test-time augmentation.
                 inputs = torch.unsqueeze(img, 0) # [1, 3, 512, 512]
-                outputs = net(inputs.cuda())
+                inputs = inputs.to(device)
+                outputs = net(inputs)
                 parsing = outputs.mean(0).cpu().numpy().argmax(0)
 
                 image_path = int(image_path[:-4])

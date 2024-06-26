@@ -5,7 +5,10 @@ import argparse
 from pathlib import Path
 import torch
 import numpy as np
+from tqdm import tqdm
+
 from data_loader import load_dir
+from data_utils.process import choose_device
 from facemodel import Face_3DMM
 from util import *
 from render_3dmm import Render_3DMM
@@ -20,7 +23,7 @@ def set_requires_grad(tensor_list):
     for tensor in tensor_list:
         tensor.requires_grad = True
 
-
+device = choose_device()
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--path", type=str, default="obama/ori_imgs", help="idname of target person"
@@ -36,7 +39,7 @@ end_id = args.frame_num
 lms, img_paths = load_dir(args.path, start_id, end_id)
 num_frames = lms.shape[0]
 h, w = args.img_h, args.img_w
-cxy = torch.tensor((w / 2.0, h / 2.0), dtype=torch.float).cuda()
+cxy = torch.tensor((w / 2.0, h / 2.0), dtype=torch.float).to(device)
 id_dim, exp_dim, tex_dim, point_num = 100, 79, 100, 34650
 model_3dmm = Face_3DMM(
     os.path.join(dir_path, "3DMM"), id_dim, exp_dim, tex_dim, point_num
@@ -180,10 +183,10 @@ print(loss_lan.item(), torch.mean(trans[:, 2]).item())
 
 print(f'[INFO] fitting light...')
 
-batch_size = 32
+batch_size = 256
 
-device_default = torch.device("cuda:0")
-device_render = torch.device("cuda:0")
+device_default = choose_device()
+device_render = choose_device()
 renderer = Render_3DMM(arg_focal, h, w, batch_size, device_render)
 
 sel_ids = np.arange(0, num_frames, int(num_frames / batch_size))[:batch_size]
@@ -191,7 +194,7 @@ imgs = []
 for sel_id in sel_ids:
     imgs.append(cv2.imread(img_paths[sel_id])[:, :, ::-1])
 imgs = np.stack(imgs)
-sel_imgs = torch.as_tensor(imgs).cuda()
+sel_imgs = torch.as_tensor(imgs).to(device)
 sel_lms = lms[sel_ids]
 sel_light = light_para.new_zeros((batch_size, 27), requires_grad=True)
 set_requires_grad([sel_light])
@@ -199,26 +202,45 @@ set_requires_grad([sel_light])
 optimizer_tl = torch.optim.Adam([tex_para, sel_light], lr=0.1)
 optimizer_id_frame = torch.optim.Adam([euler_angle, trans, exp_para, id_para], lr=0.01)
 
-for iter in range(71):
+for iter in tqdm(range(71)):
+    print(f'Iteration {iter} - Start')
+
+    print('Selecting parameters')
     sel_exp_para, sel_euler, sel_trans = (
         exp_para[sel_ids],
         euler_angle[sel_ids],
         trans[sel_ids],
     )
     sel_id_para = id_para.expand(batch_size, -1)
+
+    print('Getting 3D landmarks')
     geometry = model_3dmm.get_3dlandmarks(
         sel_id_para, sel_exp_para, sel_euler, sel_trans, focal_length, cxy
     )
+
+    print('Performing forward transform')
     proj_geo = forward_transform(geometry, sel_euler, sel_trans, focal_length, cxy)
 
+    print('Calculating landmark loss')
     loss_lan = cal_lan_loss(proj_geo[:, :, :2], sel_lms.detach())
+
+    print('Calculating regularization losses')
     loss_regid = torch.mean(id_para * id_para)
     loss_regexp = torch.mean(sel_exp_para * sel_exp_para)
 
+    print('Expanding texture parameters')
     sel_tex_para = tex_para.expand(batch_size, -1)
+
+    print('Forwarding texture through model')
     sel_texture = model_3dmm.forward_tex(sel_tex_para)
+
+    print('Forwarding geometry through model')
     geometry = model_3dmm.forward_geo(sel_id_para, sel_exp_para)
+
+    print('Applying rotation and transformation to geometry')
     rott_geo = forward_rott(geometry, sel_euler, sel_trans)
+
+    print('Rendering images')
     render_imgs = renderer(
         rott_geo.to(device_render),
         sel_texture.to(device_render),
@@ -226,30 +248,39 @@ for iter in range(71):
     )
     render_imgs = render_imgs.to(device_default)
 
+    print('Creating mask and projection')
     mask = (render_imgs[:, :, :, 3]).detach() > 0.0
     render_proj = sel_imgs.clone()
     render_proj[mask] = render_imgs[mask][..., :3].byte()
+
+    print('Calculating color loss')
     loss_col = cal_col_loss(render_imgs[:, :, :, :3], sel_imgs.float(), mask)
 
+    print('Calculating total loss')
     if iter > 50:
         loss = loss_col + loss_lan * 0.05 + loss_regid * 1.0 + loss_regexp * 0.8
     else:
         loss = loss_col + loss_lan * 3 + loss_regid * 2.0 + loss_regexp * 1.0
 
+    print('Zeroing gradients')
     optimizer_tl.zero_grad()
     optimizer_id_frame.zero_grad()
+
+    print('Performing backpropagation')
     loss.backward()
 
+    print('Stepping optimizers')
     optimizer_tl.step()
     optimizer_id_frame.step()
 
     if iter % 50 == 0 and iter > 0:
+        print('Adjusting learning rate')
         for param_group in optimizer_id_frame.param_groups:
             param_group["lr"] *= 0.2
         for param_group in optimizer_tl.param_groups:
             param_group["lr"] *= 0.2
-    # print(iter, loss_col.item(), loss_lan.item(), loss_regid.item(), loss_regexp.item())
 
+    print(f'Iteration {iter} - End')
 
 light_mean = torch.mean(sel_light, 0).unsqueeze(0).repeat(num_frames, 1)
 light_para.data = light_mean
@@ -275,7 +306,7 @@ for i in range(int((num_frames - 1) / batch_size + 1)):
     for sel_id in sel_ids:
         imgs.append(cv2.imread(img_paths[sel_id])[:, :, ::-1])
     imgs = np.stack(imgs)
-    sel_imgs = torch.as_tensor(imgs).cuda()
+    sel_imgs = torch.as_tensor(imgs).to(device)
     sel_lms = lms[sel_ids]
 
     sel_exp_para = exp_para.new_zeros((batch_size, exp_dim), requires_grad=True)
