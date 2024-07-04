@@ -197,7 +197,6 @@ class Render_3DMM(nn.Module):
         face_normal = self.compute_normal(rott_geometry)
         face_color = self.Illumination_layer(texture, face_normal, diffuse_sh)
         face_color = TexturesVertex(face_color)
-        print("starting meshes")
         mesh = Meshes(
             rott_geometry,
             self.tris.float().repeat(rott_geometry.shape[0], 1, 1),
@@ -205,13 +204,5 @@ class Render_3DMM(nn.Module):
         )
         rendered_img = self.renderer(mesh)
         rendered_img = torch.clamp(rendered_img, 0, 255)
-        self.visualize(rendered_img)
         return rendered_img
 
-    def visualize(self, rendered_img):
-        plt.ion()
-        img = rendered_img[0, ..., :3].cpu().numpy().astype(np.uint8)
-        plt.imshow(img)
-        plt.show()
-        plt.draw()
-        plt.pause(1)
